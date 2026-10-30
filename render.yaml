@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: la-zone-2keh-unban
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 30
+    healthCheckPath: /health
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: DISCORD_WEBHOOK_URL
+        sync: false
