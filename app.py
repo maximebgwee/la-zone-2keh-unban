@@ -2,9 +2,13 @@ import os, sqlite3, secrets, time
 from datetime import datetime, timezone
 from functools import wraps
 from flask import Flask, request, render_template, redirect, url_for, session, flash, abort
+from werkzeug.middleware.proxy_fix import ProxyFix
 import requests
 
 app=Flask(__name__)
+# Render transmet l'adresse du visiteur via X-Forwarded-For.
+# On ne fait confiance qu'au proxy direct, pas aux en-têtes arbitraires du client.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
 app.secret_key=os.environ.get("SECRET_KEY") or secrets.token_hex(32)
 DB=os.environ.get("DATABASE_PATH","data.db")
 WEBHOOK=os.environ.get("DISCORD_WEBHOOK_URL","")
@@ -23,7 +27,7 @@ def init():
 init()
 
 def client_ip():
-    # Adresse vue par Flask ; ne pas accepter un en-tête fourni librement par le visiteur.
+    # ProxyFix remplace remote_addr avec l'IP transmise par le proxy de Render.
     return request.remote_addr or "inconnu"
 
 def notify_visit(ip, path, user_agent, created):
