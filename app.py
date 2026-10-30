@@ -87,16 +87,16 @@ def appeal():
     ip=client_ip()
     if not rate_ok(ip):
         flash("Trop de demandes. Réessaie dans un moment.","error"); return redirect(url_for("index"))
-    fields={k:request.form.get(k,"").strip() for k in ("discord","discord_id","roblox","roblox_id","reason","explanation","why","evidence")}
-    if any(not fields[k] for k in ("discord","discord_id","roblox","roblox_id","reason","explanation","why")):
+    fields={k:request.form.get(k,"").strip() for k in ("discord","discord_id","reason","explanation","why","evidence")}
+    if any(not fields[k] for k in ("discord","discord_id","reason","explanation","why")):
         flash("Merci de remplir tous les champs obligatoires.","error"); return redirect(url_for("index"))
     if len(fields["explanation"])>3000 or len(fields["why"])>2000: abort(400)
     created=datetime.now(timezone.utc).isoformat()
     with db() as c:
-        cur=c.execute("""INSERT INTO appeals(created,discord,discord_id,roblox,roblox_id,reason,explanation,why,evidence,ip,user_agent) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",(created,fields["discord"],fields["discord_id"],fields["roblox"],fields["roblox_id"],fields["reason"],fields["explanation"],fields["why"],fields["evidence"],ip,request.user_agent.string[:250]))
+        cur=c.execute("""INSERT INTO appeals(created,discord,discord_id,reason,explanation,why,evidence,ip,user_agent) VALUES(?,?,?,?,?,?,?,?,?)""",(created,fields["discord"],fields["discord_id"],fields["reason"],fields["explanation"],fields["why"],fields["evidence"],ip,request.user_agent.string[:250]))
         appeal_id=cur.lastrowid
     if WEBHOOK:
-        embed={"title":f"Nouvelle demande de débanissement #{appeal_id}","color":0x8B5CF6,"fields":[{"name":"Discord","value":fields["discord"]+" • "+fields["discord_id"],"inline":True},{"name":"Roblox","value":fields["roblox"]+" • "+fields["roblox_id"],"inline":True},{"name":"Motif du ban","value":fields["reason"][:1000],"inline":False},{"name":"Explications","value":fields["explanation"][:1000],"inline":False},{"name":"Pourquoi un débanissement ?","value":fields["why"][:1000],"inline":False},{"name":"Preuve / lien","value":fields["evidence"][:500] or "Aucune","inline":False}]}
+        embed={"title":f"Nouvelle demande de débanissement #{appeal_id}","color":0x8B5CF6,"fields":[{"name":"Discord","value":fields["discord"]+" • "+fields["discord_id"],"inline":True},{"name":"Motif du ban","value":fields["reason"][:1000],"inline":False},{"name":"Explications","value":fields["explanation"][:1000],"inline":False},{"name":"Pourquoi un débanissement ?","value":fields["why"][:1000],"inline":False},{"name":"Preuve / lien","value":fields["evidence"][:500] or "Aucune","inline":False}]}
         try: requests.post(WEBHOOK,json={"embeds":[embed]},timeout=8).raise_for_status()
         except requests.RequestException: app.logger.exception("Discord webhook failed")
     flash("Ta demande a bien été enregistrée. Elle sera étudiée par l'équipe.","success")
