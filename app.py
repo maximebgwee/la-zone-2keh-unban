@@ -23,16 +23,43 @@ def init():
 init()
 
 def client_ip():
-    # Ne pas faire confiance aux en-têtes proxy sauf si l'hébergeur les définit.
+    # Adresse vue par Flask ; ne pas accepter un en-tête fourni librement par le visiteur.
     return request.remote_addr or "inconnu"
+
+def notify_visit(ip, path, user_agent, created):
+    """Envoie une alerte de sécurité minimale au webhook privé configuré."""
+    if not WEBHOOK:
+        return
+    embed = {
+        "title": "Nouvelle visite du site",
+        "color": 0x8B5CF6,
+        "fields": [
+            {"name": "Adresse IP", "value": str(ip)[:100], "inline": True},
+            {"name": "Date (UTC)", "value": str(created)[:80], "inline": True},
+            {"name": "Page", "value": str(path)[:500], "inline": False},
+            {"name": "Navigateur", "value": str(user_agent or "Inconnu")[:250], "inline": False},
+        ],
+        "footer": {"text": "Journal de sécurité • conservation limitée"}
+    }
+    try:
+        requests.post(WEBHOOK, json={"embeds": [embed]}, timeout=4).raise_for_status()
+    except requests.RequestException:
+        app.logger.exception("Discord visit webhook failed")
+
 def blocked(ip):
     with db() as c: return c.execute("SELECT 1 FROM bans WHERE ip=?",(ip,)).fetchone() is not None
 @app.before_request
 def track():
     ip=client_ip()
     if blocked(ip): abort(403)
-    if request.endpoint not in ("static",):
-        with db() as c: c.execute("INSERT INTO visits(created,ip,path,user_agent) VALUES(?,?,?,?)",(datetime.now(timezone.utc).isoformat(),ip,request.path,request.user_agent.string[:250]))
+    if request.endpoint not in ("static", "health"):
+        created = datetime.now(timezone.utc).isoformat()
+        ua = request.user_agent.string[:250]
+        with db() as c:
+            c.execute("INSERT INTO visits(created,ip,path,user_agent) VALUES(?,?,?,?)",(created,ip,request.path,ua))
+            # Les journaux de visites sont automatiquement supprimés après 30 jours.
+            c.execute("DELETE FROM visits WHERE created < ?", ((datetime.now(timezone.utc) - __import__("datetime").timedelta(days=30)).isoformat(),))
+        notify_visit(ip, request.path, ua, created)
 def rate_ok(ip):
     now=int(time.time())
     with db() as c:
