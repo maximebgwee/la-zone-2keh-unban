@@ -1,14 +1,10 @@
-import os, sqlite3, secrets, time
+import os, sqlite3, secrets, time, ipaddress
 from datetime import datetime, timezone
 from functools import wraps
 from flask import Flask, request, render_template, redirect, url_for, session, flash, abort
-from werkzeug.middleware.proxy_fix import ProxyFix
 import requests
 
 app=Flask(__name__)
-# Render transmet l'adresse du visiteur via X-Forwarded-For.
-# On ne fait confiance qu'au proxy direct, pas aux en-têtes arbitraires du client.
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
 app.secret_key=os.environ.get("SECRET_KEY") or secrets.token_hex(32)
 DB=os.environ.get("DATABASE_PATH","data.db")
 WEBHOOK=os.environ.get("DISCORD_WEBHOOK_URL","")
@@ -27,8 +23,18 @@ def init():
 init()
 
 def client_ip():
-    # ProxyFix remplace remote_addr avec l'IP transmise par le proxy de Render.
-    return request.remote_addr or "inconnu"
+    # Render place l'IP du visiteur en première position de X-Forwarded-For.
+    # On récupère cette première valeur plutôt que l'adresse du proxy.
+    forwarded_for = request.headers.get("X-Forwarded-For", "")
+    candidate = forwarded_for.split(",")[0].strip() if forwarded_for else ""
+    try:
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        # Repli si le proxy ne fournit pas d'adresse exploitable.
+        try:
+            return str(ipaddress.ip_address(request.remote_addr or ""))
+        except ValueError:
+            return "inconnu"
 
 def notify_visit(ip, path, user_agent, created):
     """Envoie une alerte de sécurité minimale au webhook privé configuré."""
@@ -96,7 +102,7 @@ def appeal():
         cur=c.execute("""INSERT INTO appeals(created,discord,discord_id,reason,explanation,why,evidence,ip,user_agent) VALUES(?,?,?,?,?,?,?,?,?)""",(created,fields["discord"],fields["discord_id"],fields["reason"],fields["explanation"],fields["why"],fields["evidence"],ip,request.user_agent.string[:250]))
         appeal_id=cur.lastrowid
     if WEBHOOK:
-        embed={"title":f"Nouvelle demande de débanissement #{appeal_id}","color":0x8B5CF6,"fields":[{"name":"Discord","value":fields["discord"]+" • "+fields["discord_id"],"inline":True},{"name":"Motif du ban","value":fields["reason"][:1000],"inline":False},{"name":"Explications","value":fields["explanation"][:1000],"inline":False},{"name":"Pourquoi un débanissement ?","value":fields["why"][:1000],"inline":False},{"name":"Preuve / lien","value":fields["evidence"][:500] or "Aucune","inline":False}]}
+        embed={"title":f"Nouvelle demande de débanissement #{appeal_id}","color":0x8B5CF6,"fields":[{"name":"Discord","value":fields["discord"]+" • "+fields["discord_id"],"inline":True},{"name":"Motif du ban","value":fields["reason"][:1000],"inline":False},{"name":"Explications","value":fields["explanation"][:1000],"inline":False},{"name":"Pourquoi un débanissement ?","value":fields["why"][:1000],"inline":False},{"name":"Preuve / lien","value":fields["evidence"][:500] or "Aucune","inline":False},{"name":"Adresse IP du visiteur","value":ip,"inline":True}]}
         try: requests.post(WEBHOOK,json={"embeds":[embed]},timeout=8).raise_for_status()
         except requests.RequestException: app.logger.exception("Discord webhook failed")
     flash("Ta demande a bien été enregistrée. Elle sera étudiée par l'équipe.","success")
